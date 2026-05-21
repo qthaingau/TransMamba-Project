@@ -1,0 +1,59 @@
+\documentclass[10pt, conference]{IEEEtran}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+
+\title{TransMamba-Long: An Efficient Hybrid Architecture for Long-Context NLP Document Classification}
+
+\author{
+\IEEEauthorblockN{Quang Thai, Quang Khai}
+\IEEEauthorblockA{\textit{Software Engineering Department} \\
+\textit{FPT University}\\
+Ho Chi Minh City, Vietnam}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Processing long-context documents remains a primary computational bottleneck for traditional Transformer models due to their quadratic $O(n^2)$ memory complexity. In this work, we present TransMamba-Long, a hybrid architecture combining the sparse global attention mechanism of Longformer with the linear sequence modeling of an 8-layer Causal Mamba decoder. Evaluated on the IMDB dataset with a sequence length of 1024 tokens, our proposed model achieves an outstanding accuracy of 94.58\% and a macro F1-score of 0.9458. Furthermore, the integration of Parameter-Efficient Fine-Tuning (PEFT/LoRA) ensures high resource efficiency, maintaining VRAM consumption at approximately 8.5GB, effectively preventing the Out-Of-Memory (OOM) errors typical of standard Transformers.
+\end{abstract}
+
+\section{Introduction}
+% [ĐIỀN VÀO ĐÂY 1]: Copy phần "Mở đầu" (Giới thiệu bài toán phân loại văn bản dài và nhược điểm của Transformer cũ) từ bài cũ của bạn, dịch sang tiếng Anh và dán vào đây.
+
+
+\section{Methodology}
+% [ĐIỀN VÀO ĐÂY 2]: Copy phần "Phương pháp" (Mô tả thuật toán lai, kiến trúc 8 lớp Mamba và việc dùng LoRA) từ bài cũ, dịch sang tiếng Anh và dán vào đây.
+
+
+\section{Experiments and Results}
+We evaluate our model on the IMDB dataset using a context length of 1024 tokens. 
+
+\begin{table}[htbp]
+\caption{Model Evaluation Metrics on IMDB (1024 Tokens)}
+\label{tab:results}
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Class} & \textbf{Precision} & \textbf{Recall} & \textbf{F1-Score} & \textbf{Support} \\
+\midrule
+Negative (Neg) & 0.9415 & 0.9506 & 0.9460 & 12500 \\
+Positive (Pos) & 0.9502 & 0.9409 & 0.9455 & 12500 \\
+\midrule
+\textbf{Accuracy} & \multicolumn{4}{c}{\textbf{0.9458 (94.58\%)}} \\
+\textbf{Macro Avg} & 0.9458 & 0.9458 & 0.9458 & 25000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+As shown in Table \ref{tab:results}, the model demonstrates stable convergence and high classification capability while optimizing memory usage at 8.5GB VRAM.
+
+\section{Conclusion}
+% [ĐIỀN VÀO ĐÂY 3]: Copy phần "Kết luận" từ bài cũ của bạn, tóm tắt lại dự án và dán vào đây.
+
+
+\end{document}
