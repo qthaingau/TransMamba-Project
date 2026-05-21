@@ -1,0 +1,292 @@
+\documentclass[10pt, conference]{IEEEtran}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+
+\title{TransMamba-Cls: Adapting Hybrid Transformer-Mamba Architecture for Text Classification on GLUE Benchmark} % [cite: 1, 2, 3, 4]
+
+\author{
+\IEEEauthorblockN{Anonymous Author(s)} % [cite: 5]
+\IEEEauthorblockA{\textit{Affiliation anonymized for review}} % [cite: 6]
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Recent advances in State Space Models (SSMs), particularly Mamba, have shown competitive performance with Transformers while achieving linear-time complexity. % [cite: 7]
+However, hybrid Transformer-SSM architectures have been mainly evaluated on generative and reasoning benchmarks, with limited investigation on discriminative text classification. % [cite: 8]
+We present TRANSMAMBA-CLS (where Cls stands for Classification), an adaptation of the TransMamba hybrid architecture for text classification on the GLUE benchmark. % [cite: 9]
+Our approach combines a pretrained BERT encoder with a Mamba decoder through a Feature Fusion mechanism employing multi-head cross-attention. % [cite: 10]
+We evaluate on two GLUE tasks (SST-2, RTE) across two encoder scales, comparing against BERT baselines and DistilBERT. % [cite: 11]
+TransMamba-small achieves the best accuracy among evaluated models on RTE despite having 35\% fewer parameters than DistilBERT, while remaining competitive on SST-2. % [cite: 12]
+Our ablation study reveals that the optimal fusion strategy is task-dependent: simpler strategies suffice for short-sequence tasks, while cross-attention provides clear benefits for longer, low-resource tasks. % [cite: 13]
+\end{abstract}
+
+\begin{IEEEkeywords}
+Hybrid Architecture, Transformer, Mamba, Text Classification, Feature Fusion % [cite: 14]
+\end{IEEEkeywords}
+
+\section{Introduction} % [cite: 15]
+Transformer-based models have become the dominant architecture in Natural Language Processing (NLP), achieving state-of-the-art results across numerous benchmarks [3,13]. % [cite: 16]
+However, their quadratic computational complexity $O(n^{2})$ with respect to sequence length poses significant challenges for processing long documents and real-time applications [15,1]. % [cite: 17]
+State Space Models (SSMs) [5], particularly Mamba [4], have emerged as a promising alternative with linear-time complexity $O(n)$ through selective scan mechanisms. % [cite: 18]
+While Mamba excels at capturing sequential patterns efficiently, it may lack the global contextual understanding provided by self-attention mechanisms in Transformers [12]. % [cite: 19]
+
+To bridge this gap, Zhu et al. [17] proposed TransMamba, a hybrid architecture that combines a Transformer encoder with a Mamba decoder through a Feature Fusion mechanism. % [cite: 20, 23]
+Their work showed strong performance on reasoning benchmarks (ARC, HellaSwag, PIQA) with a 350M parameter model trained from scratch. % [cite: 23]
+However, the applicability of this architecture to text classification tasks remains unexplored. % [cite: 24]
+This gap is non-trivial: Mamba's causal selective scan is designed for autoregressive generation, whereas discriminative classification requires bidirectional context understanding. % [cite: 25]
+Directly applying generative hybrid models to classification is therefore not straightforward and warrants systematic investigation. % [cite: 26]
+
+Motivated by this gap, the main contributions of this work are summarized as follows: % [cite: 27]
+\begin{itemize}
+    \item We propose TRANSMAMBA-CLS, a hybrid architecture that adapts the TransMamba encoder-decoder framework [17] for discriminative text classification by integrating pretrained BERT encoders with Mamba decoders. % [cite: 28]
+    \item We adapt and evaluate the Feature Fusion mechanism from TransMamba [17], which employs learned projections and multi-head cross-attention to bridge the representation gap between Transformer and SSM modules, for classification tasks on GLUE. % [cite: 29]
+    \item We conduct a systematic empirical evaluation of hybrid Transformer-Mamba architectures on the GLUE text classification benchmark across two encoder scales and two representative tasks to assess the effectiveness of fusion strategies. % [cite: 30]
+    \item Notably, TransMamba-small achieves 62.09\% on RTE, outperforming DistilBERT (61.73\%) with 35\% fewer parameters. % [cite: 31]
+\end{itemize}
+
+\section{Related Work} % [cite: 33]
+\subsection{Transformer and State Space Models for Text Classification} % [cite: 34]
+Transformer-based pretrained models have dominated text classification benchmarks since the introduction of BERT [3]. % [cite: 34]
+The GLUE benchmark [13] serves as the standard evaluation framework, encompassing tasks such as sentiment analysis (SST-2) [11], natural language inference (MNLI) [14], and textual entailment (RTE) [2]. % [cite: 35]
+Various BERT variants including DistilBERT [10], ALBERT [6], and RoBERTa [8] have achieved progressively higher scores on these benchmarks. % [cite: 36]
+However, these Transformer-based approaches share a common limitation: their $O(n^{2})$ self-attention complexity makes them computationally expensive for long sequences, motivating research into more efficient alternatives. % [cite: 37]
+
+On the other hand, State Space Models such as S4 [5] and Mamba [4] offer linear-time complexity through selective scan mechanisms, showing competitive results on sequence modeling tasks. % [cite: 38]
+However, these SSM-based models have been primarily evaluated on generative language modeling and long-range benchmarks, with fewer studies investigating their effectiveness on standard discriminative classification tasks within the GLUE framework. % [cite: 39]
+
+\subsection{Hybrid Architectures} % [cite: 42]
+An alternative research direction focuses on combining the strengths of Transformers and SSMs. Zhu et al. [17] proposed TransMamba, which integrates a Transformer encoder with a Mamba decoder through a Feature Fusion mechanism, showing strong performance on reasoning benchmarks. % [cite: 43, 44]
+Lieber et al. [7] introduced Jamba, which interleaves Transformer and Mamba layers within a mixture-of-experts framework. % [cite: 45]
+These hybrid approaches show promise for combining both global attention and efficient sequential processing. % [cite: 46]
+However, existing hybrid architectures have primarily been evaluated on language modeling or reasoning tasks, with limited evaluation on downstream classification benchmarks. % [cite: 47]
+
+\subsection{Positioning of This Work} % [cite: 49]
+Compared with prior studies, the proposed framework differs in several key aspects. % [cite: 50]
+First, it adapts the TransMamba hybrid architecture specifically for discriminative text classification rather than language modeling or reasoning. % [cite: 51]
+Second, it replaces the custom Transformer encoder with pretrained BERT models, enabling practical deployment with significantly fewer computational resources. % [cite: 52]
+Third, it provides one of the few evaluations of a hybrid Transformer-Mamba architecture on discriminative GLUE tasks. % [cite: 53]
+Finally, it systematically analyzes the contribution of each fusion component through ablation studies on multiple fusion strategies. % [cite: 54]
+
+\section{Methodology} % [cite: 55]
+
+\subsection{Overview} % [cite: 56, 57]
+The overall architecture of TRANSMAMBA-CLS is illustrated in Fig. 1. The framework follows an encoder-decoder-fusion design, consisting of three main components: (1) a pretrained BERT encoder for extracting global contextual features, (2) a Mamba decoder stack for sequential modeling, and (3) a Feature Fusion module that combines both representations through learned projections and cross-attention. % [cite: 58]
+
+% Placeholder for Figure 1
+\begin{figure}[htbp]
+\centering
+\rule{8cm}{5cm} % Replace with \includegraphics{figure1.png}
+\caption{Architecture of TRANSMAMBA-CLS. The pretrained BERT encoder provides global context features $E$, which are processed through two parallel paths: Transformer Proj refines encoder features into $E^{\prime}$, while the Mamba decoder produces sequential features $H$ that are projected into $H^{\prime}$. The cross-attention fusion combines both representations.} % [cite: 88, 89]
+\label{fig:arch}
+\end{figure}
+
+\subsection{Pretrained Transformer Encoder} % [cite: 59, 60]
+Pretrained BERT models [3] are employed as the encoder component. % [cite: 61]
+Given an input sequence of tokens $x=(x_{1},x_{2},...,x_{n})$, the encoder produces contextualized representations: % [cite: 62]
+\begin{equation}
+E = BERT(x) \in \mathbb{R}^{n\times d} % [cite: 63, 64]
+\end{equation}
+where $d$ is the hidden dimension. Two encoder scales are investigated (Table \ref{tab:encoder}) to study the relationship between encoder capacity and hybrid model performance. % [cite: 65]
+
+\begin{table}[htbp]
+\caption{Encoder configurations used in the experiments.} % [cite: 98]
+\label{tab:encoder}
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Encoder} & \textbf{Layers} & \textbf{Hidden} & \textbf{Heads} & \textbf{Params} \\ % [cite: 99]
+\midrule
+BERT-tiny & 2 & 128 & 2 & 4.4M \\ % [cite: 99]
+BERT-small & 4 & 512 & 8 & 28.8M \\ % [cite: 99]
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Mamba Decoder Stack} % [cite: 90]
+The decoder consists of $N$ stacked PureSSM layers, a simplified SSM architecture that applies selective state space modeling without gating or MLP sub-layers, with pre-norm using RMSNorm [16]. % [cite: 91]
+Each layer applies: % [cite: 92]
+\begin{equation}
+x_l = SSM(RMSNorm(x_{l-1})) + x_{l-1} % [cite: 93, 94]
+\end{equation}
+The Selective State Space Model (SSM) in each layer implements input-dependent discretization and selective scanning: % [cite: 95]
+\begin{equation}
+h_{t}=\overline{A}h_{t-1}+\overline{B}x_{t}, \quad y_{t}=Ch_{t}+Dx_{t} % [cite: 100, 101]
+\end{equation}
+where $\overline{A}=\exp(\Delta A)$ and $\overline{B}=(\Delta A)^{-1}(\exp(\Delta A)-I)\cdot \Delta B$ are the discretized state matrices, and $\Delta$ is the input-dependent step size [4]. % [cite: 102]
+In this work, $N=8$ decoder layers are used. The original TransMamba employs 8 encoder and 16 decoder layers (1:2 ratio); here, the decoder depth is fixed at 8 layers across all encoder scales to isolate the effect of encoder capacity on classification performance. % [cite: 103, 104]
+
+\subsection{Feature Fusion Module} % [cite: 105]
+The core contribution of the TransMamba architecture is the Feature Fusion mechanism [17], which enables the decoder to attend back to encoder representations. % [cite: 106]
+Following Zhu et al. [17], the fusion module consists of four steps: (1) the encoder output $E$ is refined through a two-layer linear projection with SiLU activation to produce $E^{\prime}$; (2) the decoder output $H$ is projected through pointwise convolutions to produce $H^{\prime}$; (3) multi-head cross-attention combines $E^{\prime}$ and $H^{\prime}$ and (4) a residual connection followed by mean pooling produces the final classification. % [cite: 107]
+
+\textbf{Step 1: Transformer Feature Projection.} The encoder output is refined through a two-layer projection [17]: % [cite: 108]
+\begin{equation}
+E^{\prime}=LN(E+Linear_{2d\rightarrow d}(SiLU(Linear_{d\rightarrow 2d}(E)))) % [cite: 109, 110]
+\end{equation}
+
+\textbf{Step 2: Mamba Feature Projection.} The decoder output is projected using pointwise convolutions [17]: % [cite: 111]
+\begin{equation}
+H^{\prime}=LN(H+Conv1x1_{2d\rightarrow d}(SiLU(Conv1x1_{d\rightarrow 2d}(H)))) % [cite: 112, 113]
+\end{equation}
+
+\textbf{Step 3: Cross-Attention.} The projected features are combined through multi-head cross-attention [12]: % [cite: 114]
+\begin{equation}
+F = CrossAttn(Q = H^{\prime}, K = E^{\prime}, V = E^{\prime}) % [cite: 115, 116]
+\end{equation}
+
+\textbf{Step 4: Residual Connection.} The fused output with residual connection, mean pooling and classification: % [cite: 117]
+\begin{equation}
+O=LN(H^{\prime}+F), \quad \hat{y}=MLP(RMSNorm(MeanPool(O))) % [cite: 118, 119]
+\end{equation}
+
+\subsection{Training Strategy} % [cite: 124]
+A differential learning rate strategy is adopted: encoder learning rate $\alpha_{e}= 2\times 10^{-5}$ and decoder/fusion learning rate $\alpha_{d}=5\times 10^{-4}$, both with weight decay 0.01. % [cite: 125]
+The encoder learning rate follows the standard BERT fine-tuning convention [3] to preserve pretrained representations, while the higher decoder rate is set to accelerate convergence for the randomly initialized Mamba layers, consistent with the training configuration of the original TransMamba [17]. % [cite: 126]
+The AdamW optimizer [9] is used with linear warmup (10\% of total steps) followed by cosine decay, and gradient clipping with max norm 1.0. % [cite: 127]
+These settings follow the defaults recommended by Loshchilov and Hutter [9]. % [cite: 128]
+
+\section{Results} % [cite: 129]
+
+\subsection{Experimental Setup} % [cite: 130]
+The experiments are conducted on two representative tasks from the GLUE benchmark [13] (Table \ref{tab:dataset}), loaded via the Hugging Face datasets library (version 2.16). % [cite: 131]
+Tasks are selected to cover diverse aspects of language understanding: data scale (large vs. small), task type (single-sentence vs. sentence-pair), and sequence length (short vs. long). % [cite: 132]
+
+\begin{table}[htbp]
+\caption{Dataset statistics for the GLUE tasks used in the evaluation.} % [cite: 122]
+\label{tab:dataset}
+\centering
+\begin{tabular}{llccc}
+\toprule
+\textbf{Task} & \textbf{Type} & \textbf{Labels} & \textbf{Train/Dev} & \textbf{Avg Len} \\ % [cite: 123]
+\midrule
+SST-2 & Sentiment & 2 (pos/neg) & 67,349 / 872 & $\sim$19 \\ % [cite: 123]
+RTE & Entailment & 2 (ent/not ent) & 2,490 / 277 & $\sim$60 \\ % [cite: 123]
+\bottomrule
+\end{tabular}
+\end{table}
+
+TRANSMAMBA-CLS is compared against four baselines: (1) BERT-tiny (4.4M params); (2) BERT-small (28.8M params); (3) DistilBERT [10] (66.9M params); (4) Pure Mamba (9.7M params). % [cite: 137, 138, 139, 140]
+The complete training configuration is summarized in Table \ref{tab:hyper}. % [cite: 145]
+
+\begin{table}[htbp]
+\caption{Training hyperparameters and environment.} % [cite: 144]
+\label{tab:hyper}
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Hyperparameter} & \textbf{Value} \\ % [cite: 143]
+\midrule
+Encoder LR & $2\times 10^{-5}$ \\ % [cite: 143]
+Decoder/Fusion LR & $5\times 10^{-4}$ \\ % [cite: 143]
+Optimizer & AdamW (weight decay 0.01) \\ % [cite: 143]
+Scheduler & Cosine decay with 10\% warmup \\ % [cite: 143]
+Batch size & 32 \\ % [cite: 143]
+Max sequence length & 128 \\ % [cite: 143]
+Epochs (SST-2/RTE) & 5 / 15 \\ % [cite: 143]
+Gradient clipping & max norm 1.0 \\ % [cite: 143]
+Mamba decoder layers & 8 \\ % [cite: 143]
+Random seed & 42 \\ % [cite: 143]
+GPU Framework & NVIDIA RTX 4090 / RTX 3060 / T4 \\ % [cite: 143]
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Results on GLUE Tasks} % [cite: 152]
+Table \ref{tab:main_results} presents the main comparison results. All TransMamba models use an 8-layer Mamba decoder; the best-performing fusion strategy is selected for each model scale based on the ablation results. % [cite: 153, 154]
+
+\begin{table}[htbp]
+\caption{Main results on GLUE development sets. Accuracy (\%) is reported. Training time (minutes) is measured on SST-2.} % [cite: 162]
+\label{tab:main_results}
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{SST-2} & \textbf{RTE} & \textbf{Params} & \textbf{Time (min)} \\ % [cite: 164]
+\midrule
+\multicolumn{5}{l}{\textbf{Baselines}} \\ % [cite: 164]
+BERT-tiny (encoder-only) & 81.08 & 55.60 & 4.4M & 2.3 \\ % [cite: 164]
+BERT-small (encoder-only) & 88.76 & 61.37 & 28.8M & 19.9 \\ % [cite: 164]
+DistilBERT (encoder-only) & \textbf{91.63} & 61.73 & 66.9M & 58.6 \\ % [cite: 164]
+Pure Mamba (decoder-only) & 82.80 & 53.07 & 9.7M & 65.6 \\ % [cite: 164]
+\midrule
+\multicolumn{5}{l}{\textbf{TransMamba-Cls (8L decoder)}} \\ % [cite: 164]
+TransMamba-Cls-tiny & 83.49 & 57.04 & 5.5M & 134.1 \\ % [cite: 164]
+TransMamba-Cls-small & 87.73 & \textbf{62.09} & 43.6M & 139.1 \\ % [cite: 164]
+TransMamba-Cls-small (frozen) & 84.17 & 56.32 & 17.0M & 136.7 \\ % [cite: 164]
+\bottomrule
+\end{tabular}
+\end{table}
+
+TRANSMAMBA-CLS outperforms the BERT-tiny and Pure Mamba baselines across both tasks. % [cite: 155]
+Notably, TransMamba-small achieves the highest accuracy on RTE (62.09\%), outperforming not only BERT-small (61.37\%) but also DistilBERT (61.73\%) despite having 35\% fewer parameters. % [cite: 156]
+This indicates that the Mamba decoder provides a complementary advantage for low-resource, longer-sequence tasks. % [cite: 165]
+
+\subsection{Ablation Study} % [cite: 174]
+To quantify the contribution of each fusion component, four fusion strategies are evaluated while keeping the encoder (BERT-small) and decoder (8 layers) fixed (Table \ref{tab:ablation}). % [cite: 175]
+
+\begin{table}[htbp]
+\caption{Ablation study on fusion strategies using BERT-small encoder and 8-layer Mamba decoder.} % [cite: 178]
+\label{tab:ablation}
+\centering
+\begin{tabular}{llccc}
+\toprule
+\textbf{Fusion Type} & \textbf{Description} & \textbf{Params} & \textbf{SST-2} & \textbf{RTE} \\ % [cite: 180]
+\midrule
+None & Only Mamba output & 42.6M & 87.16 & 60.29 \\ % [cite: 180]
+Additive & $LN(H+E)$ & 42.6M & \textbf{87.73} & 58.48 \\ % [cite: 180]
+Cross-Attn (Ours) & $CrossAttn(H,E,E)$ & 43.6M & \textbf{87.73} & \textbf{62.09} \\ % [cite: 180]
+Cross-Attn + Proj* & $CrossAttn(H^{\prime}, E^{\prime}, E^{\prime})$ & 17.0M & 84.17 & 56.32 \\ % [cite: 180]
+\bottomrule
+\end{tabular}
+\end{table}
+
+The ablation reveals that for short-sequence sentiment classification with abundant data (SST-2), both simple addition and attention mechanisms effectively combine the representations. % [cite: 181, 182]
+However, on RTE (longer sequences, low-resource), Cross-Attention achieves the best performance (62.09\%). % [cite: 183]
+
+\section{Discussion} % [cite: 188]
+\textbf{Task-Dependent Fusion Effectiveness.} The ablation study reveals that the optimal fusion strategy is task-dependent. % [cite: 191]
+For SST-2, simpler fusions perform comparably to cross-attention. % [cite: 192]
+For RTE, cross-attention provides a clear advantage (+1.80\% over no fusion). % [cite: 193]
+
+% Placeholder for Figure 2
+\begin{figure}[htbp]
+\centering
+\rule{8cm}{4cm} % Replace with \includegraphics{figure2.png}
+\caption{Accuracy vs. number of parameters trade-off on SST-2 (left) and RTE (right). On RTE, TransMamba-Cls-small achieves the highest accuracy despite having fewer parameters than DistilBERT.} % [cite: 245, 246]
+\label{fig:scatter}
+\end{figure}
+
+\textbf{Frozen Encoder Analysis.} Freezing the BERT-small encoder degrades SST-2 accuracy only slightly but substantially hurts RTE, suggesting that low-resource tasks benefit more from task-specific encoder adaptation. % [cite: 247]
+
+\section{Conclusion} % [cite: 251]
+We presented TRANSMAMBA-CLS, a hybrid Transformer-Mamba architecture adapted for text classification on the GLUE benchmark. % [cite: 252]
+By combining pretrained BERT encoders with Mamba decoders through cross-attention fusion, our model achieves the best accuracy among evaluated models on RTE (62.09\%), outperforming both BERT-small and DistilBERT despite having significantly fewer parameters. % [cite: 253]
+Future work includes evaluation on larger GLUE tasks (e.g., MNLI) and long-document classification where the linear-time advantage of Mamba is more pronounced. % [cite: 262]
+
+\begin{thebibliography}{10}
+% [cite: 263]
+\bibitem{beltagy2020longformer} I. Beltagy, M. E. Peters, and A. Cohan, ``Longformer: The long-document transformer,'' arXiv preprint arXiv:2004.05150, 2020. % [cite: 264]
+\bibitem{dagan2006pascal} I. Dagan, O. Glickman, and B. Magnini, ``The PASCAL recognising textual entailment challenge,'' in \textit{Machine Learning Challenges}, Springer, 2006, pp. 177--190. % [cite: 265, 266]
+\bibitem{devlin2019bert} J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova, ``BERT: Pre-training of deep bidirectional transformers for language understanding,'' in \textit{Proceedings of NAACL-HLT}, 2019, pp. 4171--4186. % [cite: 267, 268, 269]
+\bibitem{gu2023mamba} A. Gu and T. Dao, ``Mamba: Linear-time sequence modeling with selective state spaces,'' arXiv preprint arXiv:2312.00752, 2023. % [cite: 270]
+\bibitem{gu2022efficiently} A. Gu, K. Goel, and C. Ré, ``Efficiently modeling long sequences with structured state spaces,'' in \textit{ICLR}, 2022. % [cite: 271, 272]
+\bibitem{lan2020albert} Z. Lan et al., ``ALBERT: A lite BERT for self-supervised learning of language representations,'' in \textit{ICLR}, 2020. % [cite: 273, 274]
+\bibitem{lieber2024jamba} O. Lieber et al., ``Jamba: A hybrid Transformer-Mamba language model,'' arXiv preprint arXiv:2403.19887, 2024. % [cite: 275, 276]
+\bibitem{liu2019roberta} Y. Liu et al., ``RoBERTa: A robustly optimized BERT pretraining approach,'' arXiv preprint arXiv:1907.11692, 2019. % [cite: 277, 278]
+\bibitem{loshchilov2019decoupled} I. Loshchilov and F. Hutter, ``Decoupled weight decay regularization,'' in \textit{ICLR}, 2019. % [cite: 279]
+\bibitem{sanh2019distilbert} V. Sanh, L. Debut, J. Chaumond, and T. Wolf, ``DistilBERT, a distilled version of BERT: smaller, faster, cheaper and lighter,'' arXiv preprint arXiv:1910.01108, 2019. % [cite: 280]
+\bibitem{socher2013recursive} R. Socher et al., ``Recursive deep models for semantic compositionality over a sentiment treebank,'' in \textit{EMNLP}, 2013, pp. 1631--1642. % [cite: 281, 282]
+\bibitem{vaswani2017attention} A. Vaswani et al., ``Attention is all you need,'' \textit{NeurIPS}, vol. 30, 2017. % [cite: 284, 285]
+\bibitem{wang2019glue} A. Wang et al., ``GLUE: A multi-task benchmark and analysis platform for natural language understanding,'' in \textit{ICLR}, 2019. % [cite: 286, 287]
+\bibitem{williams2018broad} A. Williams, N. Nangia, and S. R. Bowman, ``A broad-coverage challenge corpus for sentence understanding through inference,'' in \textit{NAACL-HLT}, 2018, pp. 1112--1122. % [cite: 288, 289, 290]
+\bibitem{zaheer2020big} M. Zaheer et al., ``Big Bird: Transformers for longer sequences,'' in \textit{NeurIPS}, 2020. % [cite: 291, 292]
+\bibitem{zhang2019root} B. Zhang and R. Sennrich, ``Root mean square layer normalization,'' in \textit{NeurIPS}, vol. 32, 2019. % [cite: 293, 294]
+\bibitem{zhu2025transmamba} Y. Zhu et al., ``TransMamba: Flexibly switching between transformer and mamba,'' arXiv preprint arXiv:2501.07948, 2025. % [cite: 295, 296]
+\end{thebibliography}
+
+\end{document}
