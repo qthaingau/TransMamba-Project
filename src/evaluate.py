@@ -18,13 +18,16 @@ def main():
     model = get_peft_model(base_model, lora_config).to(device)
     
     try:
-        model.load_state_dict(torch.load("transmamba_long_weights.pth", map_location=device))
+        model.load_state_dict(torch.load("transmamba_long_4layers.pth", map_location=device))
+        print("[+] Đã nạp thành công trọng số 4 lớp.")
     except FileNotFoundError:
-        print("[-] Cảnh báo: Đang chạy đánh giá mà không có file trọng số .pth đã train.")
+        print("[-] Lỗi: Không tìm thấy file transmamba_long_4layers.pth. Hãy chạy train.py trước!")
+        return
         
     model.eval()
 
     print("[*] Đang tải tập Test...")
+    # Tăng Batch Size lên 4 cho evaluation để tính nhanh hơn
     _, test_loader = get_dataloaders(batch_size=4, max_length=1024)
 
     all_preds = []
@@ -32,7 +35,7 @@ def main():
 
     print("[*] BẮT ĐẦU CHẤM ĐIỂM...")
     with torch.no_grad():
-        for batch in tqdm(test_loader, desc="Đang đánh giá"):
+        for batch in tqdm(test_loader, desc="Evaluating"):
             ids = batch["input_ids"].to(device)
             mask = batch["attention_mask"].to(device)
             labels = batch["label"].to(device)
@@ -45,11 +48,10 @@ def main():
 
     acc = accuracy_score(all_labels, all_preds)
     print("\n" + "="*60)
-    print("📊 BẢNG KẾT QUẢ ĐÁNH GIÁ (EVALUATION METRICS)")
+    print("📊 BẢNG KẾT QUẢ ĐÁNH GIÁ (TRANSMAMBA-LONG 4 LỚP)")
     print("="*60)
-    print(f"🎯 Accuracy (Độ chính xác tổng thể): {acc:.4f} ({acc*100:.2f}%)")
+    print(f"🎯 Accuracy: {acc:.4f} ({acc*100:.2f}%)")
     print("-" * 60)
-    print("📌 Chi tiết các chỉ số:")
     print(classification_report(all_labels, all_preds, target_names=["Tiêu cực (Neg)", "Tích cực (Pos)"], digits=4))
     print("="*60)
 

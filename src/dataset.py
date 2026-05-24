@@ -3,8 +3,12 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
 
-def get_dataloaders(batch_size=4, max_length=1024):
-    print("[*] Đang tải Tokenizer và Dataset IMDB...")
+def get_dataloaders(batch_size=2, max_length=1024):
+    """
+    Tải và xử lý dataset IMDB với giới hạn 1024 tokens.
+    Sử dụng Longformer tokenizer để hỗ trợ văn bản dài.
+    """
+    print(f"[*] Đang tải Tokenizer và Dataset IMDB (Max Length: {max_length})...")
     tokenizer = AutoTokenizer.from_pretrained("allenai/longformer-base-4096")
     ds = load_dataset("imdb")
 
