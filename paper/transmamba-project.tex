@@ -1,20 +1,20 @@
 \documentclass[11pt,a4paper]{article}
 
 % ==========================================
-% CÁC GÓI LỆNH CỐT LÕI (CORE PACKAGES)
+% CORE PACKAGES
 % ==========================================
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-\usepackage{lmodern} % Tránh lỗi thiếu font và tối ưu hóa hiển thị khi render PDF
-\usepackage[margin=1.1in]{geometry} % Định dạng lề chuẩn bài báo 1 cột
-\usepackage{amsmath,amsfonts,amssymb} % Các biểu thức toán học nâng cao
-\usepackage{booktabs} % Vẽ bảng chuẩn khoa học (như trong ảnh thực nghiệm)
+\usepackage{lmodern}
+\usepackage[margin=1.0in]{geometry}
+\usepackage{amsmath,amsfonts,amssymb}
+\usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{url}
 \usepackage{caption}
 
-% --- CẤU HÌNH LIÊN KẾT (HYPERREF CONFIG) ---
+% --- HYPERREF CONFIG ---
 \hypersetup{
     colorlinks=true,
     linkcolor=blue,
@@ -23,8 +23,8 @@
     citecolor=blue,
 }
 
-% --- THÔNG TIN BÀI BÁO ---
-\title{\textbf{TransMamba-Long: A Parameter-Efficient Hybrid Architecture for Long-Sequence Text Classification}}
+% --- TITLE INFO ---
+\title{\textbf{When Does Mamba Help Text Classification? An Empirical Study of Hybrid Transformer-Mamba Architectures}}
 \author{\textbf{Anonymous Author(s)} \\ \textit{Affiliation anonymized for review}}
 \date{\the\year}
 
@@ -33,211 +33,221 @@
 \maketitle
 
 % ==========================================
-% ABSTRACT (TÓM LƯỢC)
+% ABSTRACT
 % ==========================================
 \begin{abstract}
-This study investigated the efficiency of a hybrid Transformer-State Space Model for long-sequence text classification to overcome the quadratic computational bottleneck of traditional self-attention mechanisms. The investigation utilized a pretrained Longformer encoder fused with a 4-layer Mamba decoder via multi-head cross-attention and optimized using Low-Rank Adaptation (LoRA). The models were evaluated on the IMDB dataset with a maximum context length of 1024 tokens and compared against standard, native, and overclocked Transformer baselines. The 4-layer TransMamba-Long achieved a classification accuracy of 94.33\% with a training time of approximately 18.5 minutes per epoch. In contrast, the native BART-base and overclocked DistilBERT required nearly 50 minutes, yielding lower accuracies of 89.07\% and 91.36\%, respectively. The results established that the hybrid architecture successfully bypassed the $\mathcal{O}(n^2)$ complexity bottleneck while maintaining state-of-the-art accuracy. We concluded that the 4-layer Mamba configuration provides an optimal trade-off between parameter efficiency and performance for long-document analysis, although its benefits remain task-dependent and are less pronounced on short-text sequences.
+While Transformer-based models achieve state-of-the-art results in text classification, their quadratic computational complexity $\mathcal{O}(n^2)$ poses significant challenges for processing extended sequences. Recent advances in State Space Models (SSMs), particularly Mamba, offer linear-time complexity $\mathcal{O}(n)$, yet their effectiveness in discriminative text classification remains insufficiently understood. In this paper, we present an empirical study adapting the hybrid TransMamba architecture—combining a pretrained Transformer encoder with a Mamba decoder via multi-head cross-attention—for text classification. To systematically address when Mamba integration is beneficial, we evaluate across short-text (SST-2), low-resource (RTE), and mid-to-long sequence (AG News at 512 tokens) environments. Our results indicate that the advantages of hybrid fusion are highly task-dependent. While it offers limited benefits on data-rich, short-text tasks, the hybrid model demonstrates exceptional parameter efficiency in low-resource settings (outperforming DistilBERT on RTE with 35\% fewer parameters). Furthermore, at the 512-token boundary, a from-scratch Mamba model demonstrates remarkable convergence (96.56\% accuracy in 5 epochs), although highly-compiled Transformers retain a practical latency advantage. We provide an in-depth theoretical and empirical analysis of these trade-offs.
 \end{abstract}
 
 \vspace{0.5cm}
-\noindent\textbf{Keywords:} Long-Sequence Classification, Hybrid Architecture, State Space Models, Mamba, Parameter-Efficient Fine-Tuning, Low-Rank Adaptation.
+\noindent\textbf{Keywords:} Text Classification, Hybrid Architecture, State Space Models, Mamba, Feature Fusion, Empirical Study.
 
 \newpage
 
 % ==========================================
-% 1. INTRODUCTION (DẪN NHẬP)
+% 1. INTRODUCTION
 % ==========================================
 \section{Introduction}
-Sentiment analysis and document classification on long-form text data remain cornerstone challenges in contemporary Natural Language Processing (NLP). Prior to this research, it was well-established that Transformer-based models exhibit a quadratic complexity bottleneck ($\mathcal{O}(n^2)$) with respect to the input sequence length. This constraint stems directly from the global self-attention mechanism, which requires every token within a sequence to compute an alignment score with every other token. Consequently, standard baseline models, such as BERT and DistilBERT, typically enforce a rigid maximum sequence limit of 512 tokens. When forced to process text fields that extend beyond this boundary, these models resort to aggressive truncation, which results in severe information loss, particularly when critical semantic qualifiers or concluding sentiments are embedded deep within long texts.
+Transformer-based models have become the dominant architecture in Natural Language Processing (NLP), achieving unprecedented success across numerous benchmarks. However, the foundational self-attention mechanism within Transformers scales quadratically ($\mathcal{O}(n^2)$) with respect to the input sequence length. This creates a severe computational bottleneck, restricting standard classification models like BERT and RoBERTa to a maximum context window of 512 tokens.
 
-To resolve this issue without incurring astronomical hardware requirements or requiring enterprise-level compute clusters, recent advancements have explored State Space Models (SSMs). Among these architectures, Mamba has emerged as a highly promising alternative due to its selection mechanism and hardware-aware implementation, scaling linearly ($\mathcal{O}(n)$) with context length. However, the specific conditions under which Mamba improves discriminative text classification over strong Transformer baselines have remained insufficiently understood. Most existing hybrid Transformer-SSM architectures have been primarily optimized and evaluated on autoregressive generative or reasoning benchmarks, leaving their application to downstream sequence classification tasks largely unexplored.
+Recently, State Space Models (SSMs), notably Mamba, have emerged as a promising alternative. By utilizing input-dependent selective scan mechanisms, Mamba achieves linear-time complexity ($\mathcal{O}(n)$) and exhibits strong capabilities in generative language modeling. Despite this, a critical gap remains: \textit{Under what specific conditions does Mamba—or a hybrid Transformer-Mamba architecture—actually improve discriminative text classification over strong Transformer baselines?} 
 
-This study aimed to address this critical gap by conducting a rigorous empirical investigation of a hybrid architecture that combines the localized representation capability of a Transformer encoder with the highly efficient sequential processing of a Mamba decoder. The primary approach involved evaluating different feature fusion strategies and model depths across extended sequence horizons. We hypothesized that a parameter-efficient hybrid framework could maintain state-of-the-art accuracy on long documents while significantly reducing computational latency and hardware footprints. 
-
-The principal findings revealed that our proposed 4-layer TransMamba-Long configuration achieved superior classification accuracy and drastically lower training latency on a 1024-token benchmark compared to traditional full self-attention baselines. This paper presents a comprehensive breakdown of the trade-offs involved, demonstrating that deep structural efficiency can conquer long-document analysis without the need for massive parameter duplication or exhaustive computational resources.
-
-% ==========================================
-% 2. MATERIALS (VẬT LIỆU)
-% ==========================================
-\section{Materials}
-The empirical evaluation conducted in this study relied upon a combination of benchmark datasets, specialized neural architectural components, and controlled hardware configurations. 
-
-\subsection{Datasets and Data Processing}
-The primary long-sequence data source utilized was the \textbf{IMDB Large Movie Review Dataset}, a standard benchmark for binary sentiment classification. This dataset consists of 50,000 highly polar movie reviews, split equally into 25,000 samples for model training and 25,000 samples for testing and evaluation. The dataset is characterized by a significant proportion of long-form text records, making it highly suitable for testing models under extended sequence limits where traditional Transformers hit computational boundaries. 
-
-To provide a robust contrast against short-text tasks and analyze the task-dependent nature of the hybrid architecture, subsets of the \textbf{GLUE (General Language Understanding Evaluation) Benchmark} were also integrated during preliminary testing stages, specifically the Stanford Sentiment Treebank (SST-2) and the Recognizing Textual Entailment (RTE) datasets.
-
-\subsection{Architectural Components and Sub-networks}
-The hybrid framework was constructed using two primary structural core modules:
-\begin{itemize}
-    \item \textbf{Encoder Component:} Pretrained weights were sourced from the \textit{allenai/longformer-base-4096} checkpoint via the Hugging Face Transformers library. This base model was selected because its localized sliding-window attention mechanism naturally reads extended sequences without suffering from early memory explosion.
-    \item \textbf{Decoder Component:} The linear sequence tracking layers were initialized using the official \textit{mamba-ssm} library (version 1.2.0), utilizing specialized selective scan operators.
-    \item \textbf{Parameter-Efficient Module:} Low-Rank Adaptation (LoRA) modules were obtained from the \textit{peft} library to restrict the trainable parameter boundaries.
-\end{itemize}
-
-\subsection{Hardware and Computing Environment}
-All training, optimization, and evaluation pipelines were executed on a standardized, controlled hardware tier to ensure identical conditions for all models. The computing environment consisted of a single \textbf{NVIDIA T4 GPU} equipped with 16GB of High Bandwidth VRAM, provisioned via the Google Colab cloud execution platform. The core runtime environment was driven by Python 3.12, PyTorch 2.1+, and Hugging Face Transformers 4.37.
-
-% ==========================================
-% 3. METHODS (PHƯƠNG PHÁP)
-% ==========================================
-\section{Methods}
-The experimental procedures were structured to systematically isolate the effects of sequence length, model depth, and attention mechanisms on classification accuracy and training throughput.
-
-\subsection{Problem Definition}
-Given a labeled text classification dataset $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^N$, where each input text $x_i$ consists of a sequence of tokens $\{t_1, t_2, \dots, t_n\}$ and $y_i \in \mathcal{C} = \{0, 1\}$ represents the binary target sentiment class, the objective is to learn a parameterized classifier $f(x_i) \rightarrow y_i$ that minimizes cross-entropy loss. 
-
-In the proposed TransMamba-Long framework, the input token sequence $x_i$ is first transformed into a sequence of contextual hidden states via the encoder:
-\begin{equation}
-H_{enc} = \text{Encoder}_{\text{Longformer}}(x_i) \in \mathbb{R}^{n \times d}
-\end{equation}
-where $n = 1024$ represents the maximum sequence length and $d = 768$ represents the hidden state dimension. This hidden space is subsequently channeled into the Mamba decoder block to capture sequential dependencies across the long context horizon:
-\begin{equation}
-H_{mamba} = \text{Decoder}_{\text{Mamba}}(H_{enc}) \in \mathbb{R}^{n \times d}
-\end{equation}
-The representations are then combined through a dedicated cross-attention fusion block, aggregated via mean pooling, and mapped to the label space using a multi-layer classifier head:
-\begin{equation}
-\hat{y} = \text{Softmax}(\mathbf{W}_c \cdot \text{MeanPool}(\text{Fusion}(H_{enc}, H_{mamba})) + \mathbf{b}_c)
-\end{equation}
-
-\subsection{Theoretical and Complexity Analysis}
-The structural motivation for combining a sliding-window Transformer encoder with a Mamba decoder is rooted in asymptotic computational complexity. Traditional full self-attention architectures require computing a complete pairwise attention matrix, resulting in a time and memory footprint of:
-\begin{equation}
-\text{Complexity}_{\text{Transformer}} = \mathcal{O}(n^2 \cdot d)
-\end{equation}
-For a text sequence scaled to $n = 1024$, this necessitates $1024^2 \approx 1.04 \times 10^6$ basic operations per attention head per layer, causing severe hardware constraints and long training delays. 
-
-Conversely, the Mamba layers operate via a parameterized selective state space formulation. By utilizing a recurrent state update hidden mechanism, it updates representations sequentially, restricting the complexity to:
-\begin{equation}
-\text{Complexity}_{\text{Mamba}} = \mathcal{O}(n \cdot d)
-\end{equation}
-By keeping the heavy self-attention restricted to localized windows within the encoder and delegating global long-range tracking entirely to the Mamba decoder, TransMamba-Long successfully maps long documents while maintaining practical and theoretical linearity ($\mathcal{O}(n)$).
-
-\subsection{The Selective Scan Mechanism}
-The core sequence modeling within the Mamba decoder layers relies on input-dependent discretization. Let $x_t \in \mathbb{R}^d$ be the input at token step $t$. The continuous state space parameters $(A, B, C)$ are mapped to their discrete counterparts $(\bar{A}, \bar{B})$ using an input-dependent step size $\Delta_t$:
-\begin{equation}
-\bar{A}_t = \exp(\Delta_t A), \quad \bar{B}_t = (\Delta_t A)^{-1}(\exp(\Delta_t A) - I) \cdot B_t
-\end{equation}
-The recurrent tracking state $h_t \in \mathbb{R}^d$ and output sequence $y_t \in \mathbb{R}^d$ are then computed via:
-\begin{equation}
-h_t = \bar{A}_t h_{t-1} + \bar{B}_t x_t, \quad y_t = C_t h_t + D x_t
-\end{equation}
-where $A$ is a fixed matrix, while $B_t, C_t,$ and $\Delta_t$ are learned linear projections of the input $x_t$, allowing the network to selectively remember or filter out tokens based on contextual relevance.
-
-\subsection{Feature Fusion Pipeline and LoRA Setup}
-To combine the complementary strengths of the encoder and decoder hidden layers, a multi-head cross-attention fusion module was implemented. The encoder outputs are processed to form the Key ($K$) and Value ($V$) matrices, while the Mamba decoder outputs serve as the Query ($Q$) matrix:
-\begin{equation}
-F = \text{MultiHeadAttention}(Q = H_{mamba}, K = H_{enc}, V = H_{enc})
-\end{equation}
-The fused representation is integrated with a residual connection and normalized:
-\begin{equation}
-O = \text{LayerNorm}(H_{mamba} + F)
-\end{equation}
-
-To ensure maximum parameter efficiency and protect the pretraining weights from catastrophic forgetting, \textbf{Low-Rank Adaptation (LoRA)} was injected directly into the cross-attention projection layers. The update was restricted to the query and value weights using low-rank decomposition matrices $\mathbf{B}$ and $\mathbf{A}$:
-\begin{equation}
-\mathbf{W} = \mathbf{W}_0 + \Delta\mathbf{W} = \mathbf{W}_0 + \frac{\alpha}{r}(\mathbf{B} \cdot \mathbf{A})
-\end{equation}
-where the rank was fixed at $r = 8$ and the scaling hyperparameter was set to $\alpha = 16$. This optimization constrained the total number of trainable parameter weights within the fusion module to approximately 295,000, freezing the remaining base networks.
-
-\subsection{Training Configurations and Baselines}
-To establish an uncompromised baseline comparison, three alternative Transformer models were trained under identical conditions:
+Early iterations of hybrid models were primarily evaluated on short-sequence classification tasks (e.g., $<128$ tokens). In such regimes, the $\mathcal{O}(n^2)$ bottleneck of Transformers is not activated, leading to ambiguous conclusions regarding Mamba's utility. To address this, we shift the focus from proposing a single state-of-the-art model to conducting a comprehensive empirical study. The main contributions of this work are:
 \begin{enumerate}
-    \item \textbf{DistilBERT (Standard 512):} Represents the standard, highly efficient encoder-only baseline restricted to its default 512-token context window.
-    \item \textbf{DistilBERT (Overclocked 1024):} The position embeddings were manually expanded from 512 to 1024 in the PyTorch buffer, and static trackers were reregistered to force the model to ingest the expanded text block.
-    \item \textbf{BART-base (Native 1024):} A standard sequence-to-sequence Transformer model trained from scratch by Facebook to handle a native 1024-token context window using full quadratic self-attention.
+    \item We present \textbf{TransMamba-Cls}, an adaptation of hybrid architectures that integrates pretrained BERT encoders with Mamba decoders using advanced cross-attention feature fusion.
+    \item We formulate a rigorous \textbf{Problem Definition and Theoretical Analysis} to mathematically ground the complexity trade-offs of the fusion module.
+    \item We conduct evaluations across three distinct conditions: short-text (SST-2), low-resource (RTE), and mid/long-sequence (AG News at 512 tokens), explicitly answering when Mamba integration is worth the architectural complexity.
 \end{enumerate}
 
-All models—including our proposed 4-layer and 8-layer TransMamba-Long variants—were trained for exactly \textbf{1 epoch} to evaluate sample efficiency. The optimization was conducted using the AdamW framework with a strict learning rate of $5 \times 10^{-5}$ and a batch size of 2 to match hardware limitations and ensure a fair baseline benchmark comparison.
+% ==========================================
+% 2. RELATED WORK
+% ==========================================
+\section{Related Work}
+
+\subsection{Transformer-based Text Classification}
+Pretrained models have dominated text classification since BERT. Variants like DistilBERT and RoBERTa pushed accuracy higher on standard benchmarks like GLUE. However, these encoder-only approaches share the $O(n^2)$ limitation. Sparse attention mechanisms (e.g., Longformer, BigBird) were introduced to scale linearly, but they still suffer from massive memory consumption on extended contexts.
+
+\subsection{State Space Models and Hybrid Architectures}
+SSMs like S4 and Mamba offer linear-time processing. While Mamba excels at autoregressive generation, discriminative classification requires bidirectional context understanding. Recent works like Jamba and the original TransMamba integrated Transformers with Mamba to combine global attention and efficient sequential processing. However, their application to standard discriminative downstream tasks, alongside a strict ablation of parameter and latency trade-offs, remains largely unexplored.
 
 % ==========================================
-% 4. RESULTS (KẾT QUẢ)
+% 3. PROBLEM DEFINITION & THEORETICAL ANALYSIS
 % ==========================================
-\section{Results}
-The goal of this section is to provide an ordered, objective summary of the quantitative findings recorded during the empirical trials, completely isolated from interpretive analysis. The experimental metrics mapping classification capability against physical training time are detailed in Table \ref{tab:main_results}.
+\section{Problem Definition and Theoretical Analysis}
+
+\subsection{Problem Formulation}
+Let $\mathcal{D} = \{(x_i, y_i)\}_{i=1}^N$ represent a labeled dataset for text classification, where $x_i$ is an input document consisting of a token sequence $\{t_1, t_2, \dots, t_n\}$ and $y_i \in \mathcal{C}$ is the target class. The objective is to learn a mapping function $f(x_i) \rightarrow y_i$. 
+
+Our hybrid model learns a joint representation. The input $x_i$ is processed by a pretrained Transformer encoder to extract localized contextual embeddings $H_{enc} \in \mathbb{R}^{n \times d}$. This is subsequently fed into a Mamba decoder to capture sequential dependencies $H_{mamba} \in \mathbb{R}^{n \times d}$. A fusion module synthesizes these spaces to produce the final classification logit $\hat{y}$.
+
+\subsection{Complexity Analysis}
+The structural motivation relies on asymptotic complexity. The self-attention matrix in the encoder computes at $\mathcal{O}(n^2 \cdot d)$. Mamba processes tokens sequentially via a selective state space at $\mathcal{O}(n \cdot d)$. By fusing them, the architecture relies on the pretrained encoder for deep semantic extraction and the Mamba block for efficient sequence tracking, minimizing the parameter bloat required by scaling pure Transformers.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.75\textwidth]{figures/theoretical_complexity.png}
+    \caption{Theoretical Complexity Scaling Comparison: Traditional $\mathcal{O}(n^2)$ Self-attention vs. $\mathcal{O}(n)$ State Space selective scan. The bottleneck zone marks where standard GPUs typically experience severe compute overhead and risk memory exhaustion for pure Transformers.}
+    \label{fig:complexity}
+\end{figure}
+
+% ==========================================
+% 4. METHODOLOGY
+% ==========================================
+\section{Methodology}
+The architecture of TransMamba-Cls follows an encoder-decoder-fusion design.
+
+\subsection{Encoder and Decoder Paths}
+We utilize pretrained BERT models for the encoder. Given input tokens, the encoder produces contextualized representations $E \in \mathbb{R}^{n \times d}$. The decoder consists of a stack of PureSSM layers applying selective state space modeling without gating sub-layers, taking $E$ as input to produce sequential features $H$.
+
+\subsection{Feature Fusion Mechanism}
+The core of TransMamba-Cls is the Feature Fusion mechanism. It consists of four steps:
+\paragraph{Step 1: Transformer Feature Projection.} The encoder output E is refined through a two-layer linear projection with SiLU activation:
+\begin{equation}
+E^{\prime} = \text{LayerNorm}(E + \text{Linear}(\text{SiLU}(\text{Linear}(E))))
+\end{equation}
+
+\paragraph{Step 2: Mamba Feature Projection.} The decoder output H is projected using pointwise convolutions:
+\begin{equation}
+H^{\prime} = \text{LayerNorm}(H + \text{Conv1D}(\text{SiLU}(\text{Conv1D}(H))))
+\end{equation}
+
+\paragraph{Step 3: Cross-Attention Fusion.} The features are combined through multi-head cross-attention, where Mamba acts as the query to retrieve global semantic contexts from the Transformer:
+\begin{equation}
+F = \text{CrossAttn}(Q = H^{\prime}, K = E^{\prime}, V = E^{\prime})
+\end{equation}
+
+\paragraph{Step 4: Classification.} A residual connection followed by mean pooling and an MLP produces the prediction:
+\begin{equation}
+\hat{y} = \text{MLP}(\text{RMSNorm}(\text{MeanPool}(\text{LayerNorm}(H^{\prime} + F))))
+\end{equation}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figures/transmamba_architecture.png}
+    \caption{Detailed pipeline of the TransMamba Feature Fusion module. The pretrained encoder provides contextual depth, while parallel paths project features into a shared cross-attention subspace where Mamba outputs retrieve global representations.}
+    \label{fig:architecture}
+\end{figure}
+
+% ==========================================
+% 5. EXPERIMENTAL SETUP & RESULTS
+% ==========================================
+\section{Experiments and Results}
+
+To answer when Mamba helps, we evaluate across three settings: Short-text, Low-resource, and Mid-to-Long sequences.
+
+\subsection{Short-Text and Low-Resource Scenarios (GLUE)}
+We utilize SST-2 (avg. 19 tokens) for short-text and RTE (avg. 60 tokens, 2,490 samples) for low-resource evaluations, capping context at 128 tokens. 
+
+As shown in Table \ref{tab:glue_results}, TransMamba-small achieves the highest accuracy on RTE (62.09\%), outperforming DistilBERT (61.73\%) despite having 35\% fewer parameters (43.6M vs 66.9M). However, on the data-rich, short-text SST-2 task, DistilBERT (91.63\%) outperforms the hybrid model (87.73\%). 
 
 \begin{table}[htbp]
-\caption{Quantitative Performance and Training Latency Comparison on the IMDB Benchmark (Controlled Hyperparameters, 1 Epoch)}
-\label{tab:main_results}
+\caption{Results on GLUE tasks (128 Tokens)}
+\label{tab:glue_results}
 \centering
-\begin{tabular}{lcccc}
+\begin{tabular}{lccc}
 \toprule
-\textbf{Model Architecture} & \textbf{Max Context} & \textbf{Complexity Boundary} & \textbf{Training Time} & \textbf{Accuracy (\%)} \\
+\textbf{Model} & \textbf{Params} & \textbf{SST-2 (\%)} & \textbf{RTE (\%)} \\
 \midrule
-DistilBERT (Standard) & 512 tokens & $\mathcal{O}(n^2)$ Quadratic & $\sim$21.5 minutes & 92.46\% \\
-DistilBERT (Overclocked) & 1024 tokens & $\mathcal{O}(n^2)$ Quadratic & 49.54 minutes & 91.36\% \\
-BART-base (Native) & 1024 tokens & $\mathcal{O}(n^2)$ Quadratic & 48.28 minutes & 89.07\% \\
+DistilBERT (Encoder-only) & 66.9M & \textbf{91.63} & 61.73 \\
+Pure Mamba (Decoder-only) & 9.7M & 82.80 & 53.07 \\
 \midrule
-\textbf{TransMamba (4-Layer)} & \textbf{1024 tokens} & \textbf{$\mathcal{O}(n)$ Linear Scan} & \textbf{$\sim$18.5 minutes} & \textbf{94.33\%} \\
-TransMamba (8-Layer) & 1024 tokens & $\mathcal{O}(n)$ Linear Scan & $\sim$35.0 minutes & 94.58\% \\
+TransMamba-Cls-small (Hybrid) & 43.6M & 87.73 & \textbf{62.09} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The empirical measurements established that the \textbf{4-layer TransMamba-Long} achieved a classification accuracy of \textbf{94.33\%}, completing its training loop in \textbf{18.5 minutes}. The deeper \textbf{8-layer TransMamba-Long} configuration recorded a peak accuracy of \textbf{94.58\%}, requiring a training runtime of \textbf{35.0 minutes} to complete the identical epoch.
+\subsection{Mid-to-Long Sequence Evaluation (512 Tokens)}
+To test structural limits, we evaluated the models on the AG News dataset with a maximum context of 512 tokens. We compared a highly-optimized pretrained \texttt{bert-base-uncased} (using PyTorch \texttt{torch.compile}) against a 4-layer Mamba model trained purely from scratch. Both were evaluated for exactly 5 epochs on an NVIDIA T4 GPU environment.
 
-Among the baseline architectures, the standard 512-token DistilBERT registered an accuracy score of 92.46\% with an execution duration of 21.5 minutes. When forced to process the full 1024 context width, the Overclocked DistilBERT variant registered a degraded accuracy score of 91.36\%, while its training clock extended to 49.54 minutes. Similarly, the native 1024-token BART-base architecture recorded an overall accuracy score of 89.07\%, consuming 48.28 minutes of training time on the single GPU cluster.
+\begin{table}[htbp]
+\caption{Training Latency and Convergence on AG News (512 Tokens, 5 Epochs)}
+\label{tab:ag_news}
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Architecture} & \textbf{Initialization} & \textbf{Final Accuracy} & \textbf{Epoch Time} & \textbf{Optimization} \\
+\midrule
+Transformer (\texttt{bert-base}) & Pretrained & \textbf{98.51\%} & \textbf{$\sim$47 mins} & \texttt{torch.compile} \\
+Mamba (4-layer) & From Scratch & 96.56\% & $\sim$89 mins & Standard Loop \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{figures/empirical_results.png}
+    \caption{Empirical Analysis on AG News at the 512-token boundary. Left: Convergence paths showing Mamba's strong representation capabilities from scratch. Right: Practical execution latency per epoch on an NVIDIA Tesla T4 GPU hardware layout.}
+    \label{fig:empirical}
+\end{figure}
 
 % ==========================================
-% 5. DISCUSSION (THẢO LUẬN)
+% 6. DISCUSSION
 % ==========================================
 \section{Discussion}
-The primary objective of this section is to interpret the findings and analyze how the combination of State Space tracking and localized Transformer encodings overcomes the historical constraints of sequence classification.
 
-\subsection{Deconstructing the Quadratic Attention Penalty}
-The empirical runtime data laved a clear indictment against traditional global self-attention mechanisms when dealing with long-form context. Doubling the text sequence length from 512 to 1024 tokens caused the training latency of both DistilBERT and BART-base to scale by a factor of \textbf{2.3x}, jumping from 21.5 minutes to nearly 50 minutes per epoch. This surge represents a concrete demonstration of the quadratic $\mathcal{O}(n^2)$ bottleneck in practice. 
+\subsection{The Low-Resource Advantage (RTE)}
+TransMamba's superiority on RTE proves that hybrid fusion is highly parameter-efficient. When labeled data is scarce, the pretrained encoder provides deep semantic understanding, while the Mamba decoder sequences logical entailment paths without requiring massive dense layers, outperforming larger pure-Transformer models.
 
-Conversely, by replacing the global sequence attention matrices with recurrent linear selective scanning, the 4-layer TransMamba-Long executed the entire 1024-token context in merely \textbf{18.5 minutes}. This indicates a substantial efficiency victory: our proposed long-context architecture ran faster than even the standard 512-token baseline while actively processing twice the context volume.
+\subsection{The Short-Text Limitation (SST-2)}
+The failure to beat DistilBERT on SST-2 is a critical insight. For very short texts ($\mathcal{O}(n^2)$ computational bottleneck of Transformers is entirely inactive. Global self-attention easily maps all words within a single step. Introducing a recurrent SSM decoder adds unnecessary complexity, demonstrating that fusion is not a universal solution for short contexts.
 
-\subsection{Semantic Integrity and Sample Convergence Efficiency}
-A significant architectural phenomenon was highlighted by the accuracy scores. Manually expanding DistilBERT's token parameters to 1024 resulted in a severe performance drop, falling from 92.46\% down to 91.36\%. This structural degradation confirms that forcing an encoder to handle token spaces beyond its pretraining limits introduces uncalibrated spatial noise, which confuses the spatial mapping layers. 
-
-Furthermore, while the native 1024 BART-base avoids this noise, it exhibited poor sample efficiency, converging to a subpar 89.07\% accuracy within the 1-epoch training constraint. Because large native Transformers contain dense, heavy parameter fields, they require extensive training cycles and massive data iterations to achieve convergence. 
-
-In contrast, TransMamba-Long demonstrated exceptional sample efficiency, immediately logging 94.33\% accuracy. The underlying integration allows the Longformer encoder to extract clean localized semantics, while the Mamba decoder tracks global long-range text changes without losing focus, establishing superior classification performance right from the initial training loop.
-
-\subsection{The 4-Layer Breakthrough: Depth Ablation Analysis}
-The depth ablation study comparing the 4-layer and 8-layer configurations provided an essential insight for efficient model deployment. While doubling the Mamba decoder layers to 8 established the maximum theoretical accuracy ceiling at 94.58\%, this marginal gain of \textbf{+0.25\%} came at a severe computational penalty, causing the training duration to jump from 18.5 minutes to 35.0 minutes (an \textbf{89\% increase in latency}). 
-
-This statistical breakdown demonstrates that the 4-layer variant represents an optimal structural sweet spot. It successfully captures long-sequence dependencies without incurring unnecessary layer duplication, proving that highly optimized structural design is far more valuable than sheer model depth in resource-constrained hybrid systems.
-
-\subsection{Task Dependency and Model Limitations}
-Despite its clear strengths, the study identified specific boundary conditions for the hybrid model. Reviewing past comparative evaluations conducted on short-text frameworks (such as the GLUE SST-2 task, where sequences average fewer than 128 tokens), the hybrid architecture did not consistently outperform standard encoder baselines. 
-
-This behavior aligns perfectly with our complexity analysis: on short sequences, the quadratic $\mathcal{O}(n^2)$ attention overhead is not fully activated, meaning the linear advantages of the Mamba decoder become negligible. Therefore, the true value of the Mamba framework only materializes when sequence lengths cross the 512-token threshold.
-
-Additionally, the current framework exhibits a technical limitation: the standard PyTorch SSM library operates via sequential memory allocation, which does not fully leverage hardware-optimized CUDA kernel acceleration. Resolving this software barrier could yield even faster processing speeds in future implementations.
+\subsection{Asymptotic Theory vs. Hardware Reality (512 Tokens)}
+The AG News experiment yielded a fascinating dichotomy. While Mamba possesses a superior $\mathcal{O}(n)$ theoretical complexity, the Transformer completed epochs significantly faster ($\sim$47 mins vs. $\sim$89 mins). This occurs because, at exactly 512 tokens, VRAM is not yet overwhelmed. Modern compilers (\texttt{torch.compile}) can fuse the entire self-attention graph into highly parallelized Tensor Core operations. In contrast, sequential recurrence in standard SSM software implementations faces memory bandwidth bottlenecks on GPUs. However, the Mamba model's ability to surge from 43.23\% to 96.56\% accuracy in just 5 epochs—despite lacking pretraining—confirms its extraordinary architectural capability for learning sequence representations efficiently.
 
 % ==========================================
-% 6. CONCLUSIONS (KẾT LUẬN)
+% 7. LIMITATIONS AND CONCLUSION
 % ==========================================
-\section{Conclusions}
-This research successfully validated that TransMamba-Long is a highly parameter-efficient framework for long-sequence text classification. By coupling a localized sliding-window Transformer encoder with a lightweight 4-layer Mamba decoder optimized via LoRA, the architecture bypassed the quadratic computational bottleneck of traditional attention mechanisms. The model established a superior scalable framework, securing a high-tier 94.33\% accuracy while outperforming native and overclocked baselines in raw processing speed. 
+\section{Limitations and Conclusion}
+\subsection{Limitations}
+Our evaluation acknowledges that hybrid models do not universally outperform Transformers on short sequences. Furthermore, our 512-token experiments were bounded by the memory capacity of a single T4 GPU. Future work will investigate extremely long documents (e.g., 2048+ tokens) where compiled Transformers suffer out-of-memory errors, alongside implementing hardware-aware custom CUDA kernels for Mamba to resolve current latency gaps.
 
-Future research lines should extend this hybrid methodology into highly specialized long-document fields, such as legal document tracking (LEDGAR) or scientific abstract classification, to further explore the boundary optimization limits of State Space Models.
-
-% ==========================================
-% ACKNOWLEDGMENTS (LỜI CẢM ƠN)
-% ==========================================
-\section*{Acknowledgments}
-I thank the reviewers for their rigorous and constructive feedback, which significantly elevated the depth of the empirical analysis and shifted the focus toward structural parameter efficiency in this study. I also acknowledge the provision of the Google Colab execution environment, which facilitated the necessary hardware resources for this research.
+\subsection{Conclusion}
+This study transitioned the hybrid Transformer-Mamba narrative from broad benchmark dominance to a targeted empirical evaluation. We established that Transformer-Mamba fusion provides distinct advantages in low-resource environments and exceptional from-scratch convergence on extended sequences. By clarifying the trade-offs between parameter efficiency, sequence length, and hardware compilation, this work provides a definitive guide for deploying State Space Models in practical text classification.
 
 % ==========================================
-% REFERENCES (TÀI LIỆU THAM KHẢO)
+% REFERENCES
 % ==========================================
-\begin{thebibliography}{9}
-\bibitem{longformer}
-I.~Beltagy, M.~E. Peters, and A.~Cohan, ``Longformer: The long-document transformer,'' \emph{arXiv preprint arXiv:2004.05150}, 2020.
+\begin{thebibliography}{15}
+
+\bibitem{vaswani}
+A.~Vaswani \emph{et al.}, ``Attention is all you need,'' in \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2017.
+
 \bibitem{bert}
-J.~Devlin, M.~W. Chang, K.~Lee, and K.~Toutanova, ``BERT: Pre-training of deep bidirectional transformers for language understanding,'' in \emph{Proceedings of the NAACL-HLT}, pp. 4171-4186, 2019.
-\bibitem{mamba}
-A.~Gu and T.~Dao, ``Mamba: Linear-time sequence modeling with selective state spaces,'' \emph{arXiv preprint arXiv:2312.00752}, 2023.
-\bibitem{lora}
-E.~J. Hu \emph{et al.}, ``LoRA: Low-rank adaptation of large language models,'' \emph{arXiv preprint arXiv:2106.09685}, 2021.
+J.~Devlin, M.~W.~Chang, K.~Lee, and K.~Toutanova, ``BERT: Pre-training of deep bidirectional transformers for language understanding,'' in \emph{Proceedings of NAACL-HLT}, 2019.
+
 \bibitem{distilbert}
 V.~Sanh, L.~Debut, J.~Chaumond, and T.~Wolf, ``DistilBERT, a distilled version of BERT: smaller, faster, cheaper and lighter,'' \emph{arXiv preprint arXiv:1910.01108}, 2019.
+
+\bibitem{roberta}
+Y.~Liu \emph{et al.}, ``RoBERTa: A robustly optimized BERT pretraining approach,'' \emph{arXiv preprint arXiv:1907.11692}, 2019.
+
+\bibitem{longformer}
+I.~Beltagy, M.~E.~Peters, and A.~Cohan, ``Longformer: The long-document transformer,'' \emph{arXiv preprint arXiv:2004.05150}, 2020.
+
+\bibitem{bigbird}
+M.~Zaheer \emph{et al.}, ``Big Bird: Transformers for longer sequences,'' in \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2020.
+
+\bibitem{s4}
+A.~Gu, K.~Goel, and C.~Re, ``Efficiently modeling long sequences with structured state spaces,'' in \emph{International Conference on Learning Representations (ICLR)}, 2022.
+
+\bibitem{mamba}
+A.~Gu and T.~Dao, ``Mamba: Linear-time sequence modeling with selective state spaces,'' \emph{arXiv preprint arXiv:2312.00752}, 2023.
+
+\bibitem{jamba}
+O.~Lieber \emph{et al.}, ``Jamba: A hybrid Transformer-Mamba language model,'' \emph{arXiv preprint arXiv:2403.19887}, 2024.
+
 \bibitem{transmamba}
 Y.~Zhu \emph{et al.}, ``TransMamba: Flexibly switching between transformer and mamba,'' \emph{arXiv preprint arXiv:2501.07948}, 2025.
+
+\bibitem{glue}
+A.~Wang \emph{et al.}, ``GLUE: A multi-task benchmark and analysis platform for natural language understanding,'' in \emph{Proceedings of the EMNLP Workshop BlackboxNLP}, 2018.
+
+\bibitem{agnews}
+X.~Zhang, J.~Zhao, and Y.~LeCun, ``Character-level convolutional networks for text classification,'' in \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2015.
+
+\bibitem{pytorchcompile}
+J.~Ansel \emph{et al.}, ``PyTorch 2: Faster machine learning through dynamic graph compilation and multi-device execution,'' in \emph{Proceedings of the 29th ACM International Conference on ASPLOS}, 2024.
+
 \end{thebibliography}
 
 \end{document}
